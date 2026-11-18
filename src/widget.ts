@@ -58,6 +58,12 @@ export type ChallengeWidgetDriver = {
   onMount?: () => void
   /** The product the mark names (default `auth`, as auth-js has always shown). */
   product?: WidgetProduct
+  /**
+   * A click (or Enter/Space) anywhere on the idle badge starts the check:
+   * the widget emits `faable-challenge:activate`. Faable Challenge sites turn
+   * it on; auth-js solves on submit, so its badge stays passive when idle.
+   */
+  activateOnClick?: boolean
 }
 
 // zh-TW and zh-HK read Traditional characters; the table keys them as zh-Hant.
@@ -184,6 +190,7 @@ const PRODUCT: Record<WidgetProduct, { name: string; path: string }> = {
 
 type RenderOptions = Required<ChallengeWidgetOptions> & {
   product: WidgetProduct
+  activatable: boolean
 }
 
 const brandHtml = (product: WidgetProduct) =>
@@ -212,7 +219,8 @@ const css = (T: Palette, dark: boolean, state: WidgetState) => `
 .tag{overflow:hidden;transition:background-color .2s,color .2s,border-color .2s,box-shadow .2s,height .2s}
 .tag.compact{width:32px;height:32px;padding:0;gap:0;justify-content:center}
 .measurer{position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;width:max-content}
-.tag[data-state="error"]{cursor:pointer}
+.tag[data-clickable]{cursor:pointer}
+.tag[data-clickable]:focus-visible{outline:2px solid #7c3aed;outline-offset:2px}
 .measure{position:absolute;left:0;top:0;visibility:hidden;pointer-events:none}
 .ic{position:relative;display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px}
 .ic .layer{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
@@ -277,6 +285,9 @@ const refsOf = (root: ShadowRoot): Refs => {
 
 const EASE = 'cubic-bezier(.2,.7,.2,1)'
 
+// How long «Checking you are human…» stays at least, so it can be read.
+export const MIN_SOLVING_MS = 1200
+
 /**
  * Brings the widget to `state`. The nodes persist, so every change can be
  * animated: the icon cross-fades, the text fades in and the tag's width
@@ -311,12 +322,27 @@ const render = (
 
   r.tag.dataset.state = state
   r.tag.classList.toggle('compact', compact)
-  if (state === 'error') {
+  // Clickable: the error state retries, and an idle site badge starts the
+  // check — anywhere on the badge, not only on the mark.
+  const clickable = state === 'error' || (o.activatable && state === 'idle')
+  if (clickable) {
     r.tag.setAttribute('role', 'button')
     r.tag.setAttribute('tabindex', '0')
+    r.tag.setAttribute('data-clickable', '')
   } else {
     r.tag.removeAttribute('role')
     r.tag.removeAttribute('tabindex')
+    r.tag.removeAttribute('data-clickable')
+  }
+  // The round badge has no words on screen: its name says what it is and
+  // how it is going, for a screen reader (aria-label) and a mouse (title).
+  const label = `${textsFor(o.locale)[state]} · ${PRODUCT[o.product].name}`
+  if (compact) {
+    r.tag.setAttribute('aria-label', label)
+    r.tag.setAttribute('title', label)
+  } else {
+    r.tag.removeAttribute('aria-label')
+    r.tag.removeAttribute('title')
   }
 
   // Icon: a new layer on top of the old one, cross-faded.
@@ -354,15 +380,38 @@ const render = (
   const text = textsFor(o.locale)[state]
   r.txt.className = compact ? 'txt vh' : 'txt'
   if (r.txt.textContent !== text) {
-    r.txt.textContent = text
-    if (motion && !compact) {
+    const fadeIn = () =>
       r.txt.animate(
         [
           { opacity: 0, transform: 'translateY(2px)' },
           { opacity: 1, transform: 'none' }
         ],
-        { duration: 200, easing: EASE }
+        { duration: 260, easing: EASE }
       )
+    if (motion && !compact && r.txt.textContent) {
+      // Fade the old words out, then the new ones in: a cut reads as a flicker.
+      const token = String(Date.now() + Math.random())
+      r.txt.dataset.fade = token
+      r.txt
+        .animate([{ opacity: 1 }, { opacity: 0 }], {
+          duration: 140,
+          easing: 'ease-in',
+          fill: 'forwards'
+        })
+        .finished.then(
+          () => {
+            if (r.txt.dataset.fade !== token) return
+            r.txt.textContent = text
+            r.txt.getAnimations().forEach(a => a.cancel())
+            fadeIn()
+          },
+          () => {
+            r.txt.textContent = text
+          }
+        )
+    } else {
+      r.txt.textContent = text
+      if (motion && !compact) fadeIn()
     }
   }
 
@@ -418,6 +467,7 @@ export const mountChallengeWidget = (
   let state: WidgetState = 'idle'
   const options = (): RenderOptions => ({
     product: driver.product ?? 'auth',
+    activatable: !!driver.activateOnClick,
     theme: 'auto',
     size: 'fit',
     brand: true,
@@ -438,25 +488,57 @@ export const mountChallengeWidget = (
       run()
     }
   }
-  const setState = (next: WidgetState) => {
+  // «Checking you are human…» stays on screen long enough to read: a
+  // challenge solved in 200 ms would otherwise flash it. Only the badge
+  // waits — the token, the form and the events of the caller do not.
+  let solvingSince = 0
+  let pending: ReturnType<typeof setTimeout> | null = null
+  const apply = (next: WidgetState) => {
     state = next
+    if (next === 'solving') solvingSince = Date.now()
     render(root, state, options(), el, true)
     el.dispatchEvent(
       new CustomEvent(`faable-challenge:${next}`, { bubbles: true })
     )
+  }
+  const setState = (next: WidgetState) => {
+    if (pending) {
+      clearTimeout(pending)
+      pending = null
+    }
+    const shown = Date.now() - solvingSince
+    if (
+      state === 'solving' &&
+      (next === 'done' || next === 'error') &&
+      shown < MIN_SOLVING_MS &&
+      !reducedMotion()
+    ) {
+      pending = setTimeout(() => {
+        pending = null
+        apply(next)
+      }, MIN_SOLVING_MS - shown)
+      return
+    }
+    apply(next)
   }
   const onEvent = (ev: Event) => {
     const s = (ev as CustomEvent<{ state?: WidgetState }>).detail?.state
     if (s) setState(s)
   }
   const onActivate = (ev: Event) => {
-    if (state !== 'error') return
+    const idle = state === 'idle' && !!driver.activateOnClick
+    if (state !== 'error' && !idle) return
     if (ev instanceof KeyboardEvent && ev.key !== 'Enter' && ev.key !== ' ')
       return
+    // The mark is a link to faable.com: it keeps being one.
     const target = ev.composedPath()[0] as Element | undefined
     if (target?.closest?.('.brand')) return
+    if (ev instanceof KeyboardEvent) ev.preventDefault()
     el.dispatchEvent(
-      new CustomEvent('faable-challenge:retry', { bubbles: true })
+      new CustomEvent(
+        idle ? 'faable-challenge:activate' : 'faable-challenge:retry',
+        { bubbles: true }
+      )
     )
   }
   root.addEventListener('click', onActivate)
@@ -494,6 +576,7 @@ export const mountChallengeWidget = (
     setState,
     reset: () => setState('idle'),
     unmount: () => {
+      if (pending) clearTimeout(pending)
       form?.removeEventListener('reset', onReset)
       if (followWindow) window.removeEventListener(CHALLENGE_EVENT, onEvent)
       root.removeEventListener('click', onActivate)

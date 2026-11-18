@@ -177,7 +177,8 @@ export const render = (el: Element, opts: RenderOptions): string => {
 
   const widget = mountChallengeWidget(el, opts, {
     followWindowEvents: false,
-    product: 'challenge'
+    product: 'challenge',
+    activateOnClick: true
   })
   const form = el.closest('form')
   let input: HTMLInputElement | null = null
@@ -211,10 +212,13 @@ export const render = (el: Element, opts: RenderOptions): string => {
 
   // Retry from the error state (click or Enter on the badge).
   const onRetry = () => start()
+  // A click anywhere on the idle badge starts the check, too.
   el.addEventListener('faable-challenge:retry', onRetry)
-  inst.cleanup.push(() =>
+  el.addEventListener('faable-challenge:activate', onRetry)
+  inst.cleanup.push(() => {
     el.removeEventListener('faable-challenge:retry', onRetry)
-  )
+    el.removeEventListener('faable-challenge:activate', onRetry)
+  })
 
   if (form) {
     if (execution === 'interaction') {

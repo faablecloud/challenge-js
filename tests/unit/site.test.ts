@@ -94,7 +94,8 @@ const hidden = (form: HTMLFormElement) =>
   form.querySelector(`input[name=${RESPONSE_FIELD}]`) as HTMLInputElement
 
 const until = async (fn: () => boolean) => {
-  for (let i = 0; i < 200 && !fn(); i++)
+  // Up to ~3 s: the badge holds «Checking…» for MIN_SOLVING_MS (1.2 s).
+  for (let i = 0; i < 600 && !fn(); i++)
     await new Promise(r => setTimeout(r, 5))
   expect(fn()).toBe(true)
 }
@@ -186,12 +187,15 @@ describe('site widget', () => {
     render(el, { sitekey: 'fcs_pk_test', 'error-callback': onError })
     await expect(execute(el)).rejects.toThrow('origin_not_allowed')
     expect(onError).toHaveBeenCalledOnce()
+    // The badge keeps «Checking…» readable for MIN_SOLVING_MS before it moves on.
+    await until(() => states.length === 2)
     expect(states).toEqual(['solving', 'error'])
 
     failChallenge = false
     el.dispatchEvent(new CustomEvent('faable-challenge:retry'))
     await until(() => !!getResponse(el))
-    expect(states[states.length - 1]).toBe('done')
+    // The token is there at once; the badge says «done» after its minimum.
+    await until(() => states[states.length - 1] === 'done')
   })
 
   it('renews the token before it expires while the form is on the page', async () => {
@@ -228,5 +232,26 @@ describe('site widget', () => {
   it('a widget without a site key is a clear error', () => {
     const { el } = page('')
     expect(() => render(el, { sitekey: '' })).toThrow(/sitekey/)
+  })
+
+  it('a click anywhere on the idle badge starts the check', async () => {
+    const { el } = page('data-sitekey="fcs_pk_test" data-execution="manual"')
+    render(el, { sitekey: 'fcs_pk_test', execution: 'manual' })
+    const tag = el.shadowRoot!.querySelector('.tag') as HTMLElement
+    expect(tag.getAttribute('role')).toBe('button')
+    tag
+      .querySelector('.txt')!
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }))
+    await until(() => !!getResponse(el))
+  })
+
+  it('the round badge says what it is (aria-label and title)', () => {
+    const { el } = page()
+    render(el, { sitekey: 'fcs_pk_test', size: 'compact', locale: 'es' })
+    const tag = el.shadowRoot!.querySelector('.tag') as HTMLElement
+    expect(tag.getAttribute('aria-label')).toBe(
+      'Protegido contra bots · Faable Challenge'
+    )
+    expect(tag.getAttribute('title')).toBe(tag.getAttribute('aria-label'))
   })
 })
