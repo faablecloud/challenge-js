@@ -24,9 +24,7 @@
     "./api.js": "./dist/api.js",
     "./package.json": "./package.json"
   },
-  "files": [
-    "dist"
-  ],
+  "files": ["dist"],
   "sideEffects": false,
   "scripts": {
     "build": "rm -rf dist && node build.mjs && tsc -p tsconfig.build.json",
