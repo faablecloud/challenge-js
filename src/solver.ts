@@ -364,6 +364,20 @@ const announce = (
   }
 }
 
+/**
+ * Tells only the visible badge (the window event), not `onChallenge`: the
+ * badge also follows a send that needed no challenge — the server looked at
+ * the request and let it through — while `onChallenge` keeps meaning «a
+ * challenge is being solved», as the hosted login screens read it.
+ */
+const announceBadge = (state: ChallengeState | 'idle') => {
+  if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+    window.dispatchEvent(
+      new CustomEvent(CHALLENGE_EVENT, { detail: { state } })
+    )
+  }
+}
+
 type PostResult = {
   data?: unknown
   error?: unknown
@@ -379,7 +393,15 @@ export const postWithChallenge = async <R extends PostResult>(
   send: (challenge?: { id: string; nonce: string }) => Promise<R>,
   onChallenge?: (state: ChallengeState) => void
 ): Promise<R> => {
-  const first = await send()
+  // The badge says «Checking…» while the server weighs the request.
+  announceBadge('solving')
+  let first: R
+  try {
+    first = await send()
+  } catch (e) {
+    announceBadge('idle')
+    throw e
+  }
   const details = (first.data as { details?: unknown } | null)?.details
   if (
     !first.error ||
@@ -387,6 +409,9 @@ export const postWithChallenge = async <R extends PostResult>(
       first.code !== 'challenge_invalid') ||
     !isChallengeDetails(details)
   ) {
+    // No challenge: passed («Verified»), or refused for another reason (a bad
+    // address, a deny) — then the badge goes back to rest, never to «done».
+    announceBadge(first.error ? 'idle' : 'done')
     return first
   }
   announce('solving', onChallenge)

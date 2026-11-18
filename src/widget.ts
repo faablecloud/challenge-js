@@ -509,7 +509,7 @@ export const mountChallengeWidget = (
     const shown = Date.now() - solvingSince
     if (
       state === 'solving' &&
-      (next === 'done' || next === 'error') &&
+      (next === 'done' || next === 'error' || next === 'idle') &&
       shown < MIN_SOLVING_MS &&
       !reducedMotion()
     ) {
