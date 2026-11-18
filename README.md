@@ -58,8 +58,9 @@ curl -X POST https://challenge.faable.com/v1/verify \
 }
 ```
 
-`remoteip` is required: the token is bound to the IP that solved it. A token is
-valid for 5 minutes and can be verified once.
+`remoteip` is optional: `remoteip_match` tells you whether it is the IP that
+solved the challenge, and never fails the verify. A token is valid for 5
+minutes, for your site's domains, and can be verified once.
 
 ## For Faable Auth
 
