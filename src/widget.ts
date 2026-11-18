@@ -606,11 +606,17 @@ export const resetChallengeWidgets = (
   for (const el of els) MOUNTED.get(el)?.reset()
 }
 
-/** Mounts a widget in every `[data-faable-challenge]` of the page. */
-export const mountChallengeWidgets = (root: ParentNode = document) => {
+/**
+ * Mounts a widget in every `[data-faable-challenge]` of the page. `driver`
+ * goes to each mount (auth-js passes its `onMount`).
+ */
+export const mountChallengeWidgets = (
+  root: ParentNode = document,
+  driver: ChallengeWidgetDriver = {}
+) => {
   root
     .querySelectorAll('[data-faable-challenge]')
-    .forEach(el => mountChallengeWidget(el))
+    .forEach(el => mountChallengeWidget(el, {}, driver))
 }
 
 let watching = false
@@ -619,12 +625,12 @@ let watching = false
  * Mounts the widgets on the page now and any added later (a React form that
  * renders after `createClient`). Idempotent; a no-op outside a browser.
  */
-export const watchChallengeWidgets = () => {
+export const watchChallengeWidgets = (driver: ChallengeWidgetDriver = {}) => {
   if (watching || typeof document === 'undefined') return
   if (typeof window === 'undefined' || typeof MutationObserver !== 'function')
     return
   watching = true
-  const scan = () => mountChallengeWidgets(document)
+  const scan = () => mountChallengeWidgets(document, driver)
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', scan, { once: true })
   } else {
@@ -634,8 +640,10 @@ export const watchChallengeWidgets = () => {
     for (const r of records) {
       r.addedNodes.forEach(node => {
         if (!(node instanceof Element)) return
-        if (node.matches('[data-faable-challenge]')) mountChallengeWidget(node)
-        mountChallengeWidgets(node)
+        if (node.matches('[data-faable-challenge]')) {
+          mountChallengeWidget(node, {}, driver)
+        }
+        mountChallengeWidgets(node, driver)
       })
     }
   }).observe(document.documentElement, { childList: true, subtree: true })
