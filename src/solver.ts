@@ -357,11 +357,7 @@ const announce = (
   } catch {
     // A throwing callback must not break the sign-up.
   }
-  if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
-    window.dispatchEvent(
-      new CustomEvent(CHALLENGE_EVENT, { detail: { state } })
-    )
-  }
+  dispatchBadge(state)
 }
 
 /**
@@ -370,11 +366,25 @@ const announce = (
  * the request and let it through — while `onChallenge` keeps meaning «a
  * challenge is being solved», as the hosted login screens read it.
  */
-const announceBadge = (state: ChallengeState | 'idle') => {
-  if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
-    window.dispatchEvent(
-      new CustomEvent(CHALLENGE_EVENT, { detail: { state } })
-    )
+const announceBadge = (state: ChallengeState | 'idle') => dispatchBadge(state)
+
+/**
+ * The window event the badge follows. Never throws: a page (or an SSR or
+ * test shim) with a `window` that cannot dispatch must not lose a sign-up.
+ */
+const dispatchBadge = (state: ChallengeState | 'idle') => {
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      typeof window.dispatchEvent === 'function' &&
+      typeof CustomEvent === 'function'
+    ) {
+      window.dispatchEvent(
+        new CustomEvent(CHALLENGE_EVENT, { detail: { state } })
+      )
+    }
+  } catch {
+    // The badge is decoration; the request is what matters.
   }
 }
 

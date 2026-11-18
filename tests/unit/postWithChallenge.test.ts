@@ -71,4 +71,19 @@ describe('postWithChallenge and the badge', () => {
     expect(calls).toEqual(['solving', 'done'])
     expect(badge[badge.length - 1]).toBe('done')
   })
+
+  it('a window that cannot dispatch events never loses the request', async () => {
+    const original = window.dispatchEvent
+    ;(window as unknown as { dispatchEvent: unknown }).dispatchEvent = undefined
+    try {
+      let sent = 0
+      await postWithChallenge(async () => {
+        sent++
+        return { data: { ok: true } }
+      })
+      expect(sent).toBe(1)
+    } finally {
+      window.dispatchEvent = original
+    }
+  })
 })
